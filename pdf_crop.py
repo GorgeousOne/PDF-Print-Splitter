@@ -1,7 +1,7 @@
 import fitz
 from typing import List
 
-def crop_slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:float, page_h:float, crop_vert:float = 0, crop_horz:float = 0, bleed:float = 0):
+def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:float, page_h:float, crop_vert:float = 0, crop_horz:float = 0, bleed:float = 0):
 	new_doc = fitz.open()
 
 	for _ in range(len(pos_xs) * len(pos_ys)):
@@ -23,5 +23,5 @@ def crop_slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page
 if __name__ == '__main__':
 	input_pdf = "frog.pdf"
 	doc = fitz.open(input_pdf)
-	new_doc = crop_slice_pdf(doc, 0, [0, 200], [0, 200], 200, 200)
+	new_doc = slice_pdf(doc, 0, [0, 200], [0, 200], 200, 200)
 	new_doc.save("test-split.pdf")

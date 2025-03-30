@@ -1,18 +1,23 @@
 import tkinter as tk
-from tkinter import filedialog, Canvas, Scrollbar
+from tkinter import filedialog, Canvas, Scrollbar, messagebox
 
 import fitz
 import os
 from PIL import Image, ImageTk, ImageDraw
-from page_config import Unit, PageSize, slice_area
+from page_config import Unit, PageSize, cover_area
+from pdf_crop import slice_pdf
 
 class PDFViewer:
 	def __init__(self, root):
 		self.root = root
 		self.root.title('PDF Viewer')
-		self.root.geometry('800x600')
-		# self.root.state('zoomed')
+		self.root.geometry('1200x800')
+		# self.root.state('zoomed') #maximize window
 		self.root.configure(padx=20, pady=20)
+
+		self.doc = None
+		self.current_page = 0
+		self.pdf_image = None
 
 		# Create main frame
 		self.main_frame = tk.Frame(root)
@@ -28,17 +33,7 @@ class PDFViewer:
 		self.create_page_view_widgets()
 		self.create_slicing_widgets()
 
-		# Initialize variables
-		self.doc = None
-		self.current_page = 0
-		self.zoom_level = 1.0  # For zoom functionality
-
-		# Image cache dictionary to store original page images
-		# Keys will be page numbers, values will be PIL Image objects
-		self.image_cache = {}
-
 		# Current displayed image (must keep reference to prevent garbage collection)
-		self.pdf_image = None
 		self.convert_unit()
 		self.default_dpi = 96
 
@@ -148,83 +143,95 @@ class PDFViewer:
 
 	def create_slicing_widgets(self):
 		# Information panel on right
-		self.info_frame = tk.LabelFrame(self.split_frame, text='PDF Slicing')
-		self.split_frame.add(self.info_frame)
-		self.split_frame.paneconfig(self.info_frame, minsize=200)
+		self.inputs_frame = tk.LabelFrame(self.split_frame, text='PDF Slicing')
+		self.split_frame.add(self.inputs_frame)
+		self.split_frame.paneconfig(self.inputs_frame, minsize=200)
 
 		# Dropdown for display unit
 		display_units = [f'{unit.name} ({unit.abbreviation})' for unit in Unit]
 		self.unit_var = tk.StringVar(value=display_units[2])
 		self.unit = Unit.Point
-		self.unit_label = tk.Label(self.info_frame, text='Display Unit:')
+		self.unit_label = tk.Label(self.inputs_frame, text='Display Unit:')
 		self.unit_label.pack(anchor='w')
 
-		self.unit_dropdown = tk.OptionMenu(self.info_frame, self.unit_var, *display_units, command=self.convert_unit)
+		self.unit_dropdown = tk.OptionMenu(self.inputs_frame, self.unit_var, *display_units, command=self.convert_unit)
 		self.unit_dropdown.pack(fill='x')
 
 		# Size information labels
-		self.size_info = tk.Label(self.info_frame, text='Width: --\nHeight: --')
+		self.size_info = tk.Label(self.inputs_frame, text='Width: --\nHeight: --')
 		self.size_info.pack(pady=10)
 
 		# Dropdown for paper sizes
 		paper_sizes = [size.name for size in PageSize]
-		self.paper_size_var = tk.StringVar(value=paper_sizes[0])
-		self.paper_size_label = tk.Label(self.info_frame, text='Paper Size:')
+		self.paper_size_var = tk.StringVar(value=paper_sizes[1])
+		self.paper_size_label = tk.Label(self.inputs_frame, text='Paper Size:')
 		self.paper_size_label.pack(anchor='w')
 
-		self.paper_size_dropdown = tk.OptionMenu(self.info_frame, self.paper_size_var, *paper_sizes, command=self.select_paper_size_preset)
+		self.paper_size_dropdown = tk.OptionMenu(self.inputs_frame, self.paper_size_var, *paper_sizes, command=self.select_paper_size_preset)
 		self.paper_size_dropdown.pack(fill='x')
 		
 		# Orientation selection
 		self.orientation_var = tk.StringVar(value='Portrait')
-		self.portrait_radio = tk.Radiobutton(self.info_frame, text='Portrait', variable=self.orientation_var, value='Portrait', command=self.update_orientation)
-		self.landscape_radio = tk.Radiobutton(self.info_frame, text='Landscape', variable=self.orientation_var, value='Landscape', command=self.update_orientation)
+		self.portrait_radio = tk.Radiobutton(self.inputs_frame, text='Portrait', variable=self.orientation_var, value='Portrait', command=self.update_orientation)
+		self.landscape_radio = tk.Radiobutton(self.inputs_frame, text='Landscape', variable=self.orientation_var, value='Landscape', command=self.update_orientation)
 		self.portrait_radio.pack(anchor='w')
 		self.landscape_radio.pack(anchor='w')
 
 		# Width input
 		self.width_var = tk.DoubleVar()
-		self.width_label = tk.Label(self.info_frame, text='Width:')
+		self.width_label = tk.Label(self.inputs_frame, text='Width:')
 		self.width_label.pack(anchor='w')
-		self.width_entry = tk.Entry(self.info_frame, textvariable=self.width_var)
+		self.width_entry = tk.Entry(self.inputs_frame, textvariable=self.width_var)
 		self.width_entry.pack(fill='x')
 		# self.width_var.trace_add('write', self.set_custom_paper_size)
 		self.width_entry.bind("<FocusOut>", self.set_custom_paper_size)
 
 		# Height input
 		self.height_var = tk.DoubleVar()
-		self.height_label = tk.Label(self.info_frame, text='Height:')
+		self.height_label = tk.Label(self.inputs_frame, text='Height:')
 		self.height_label.pack(anchor='w')
-		self.height_entry = tk.Entry(self.info_frame, textvariable=self.height_var)
+		self.height_entry = tk.Entry(self.inputs_frame, textvariable=self.height_var)
 		self.height_entry.pack(fill='x')
 		# self.height_var.trace_add('write', self.set_custom_paper_size)
 		self.height_entry.bind("<FocusOut>", self.set_custom_paper_size)
 
 		# Margin horizontal input
-		self.margin_h_var = tk.DoubleVar()
-		self.margin_h_label = tk.Label(self.info_frame, text='Printer Margin Horizontal:')
+		self.margin_h_var = tk.DoubleVar(value=Unit.Millimeter.toPt(7))
+		self.margin_h_label = tk.Label(self.inputs_frame, text='Printer Margin Horizontal:')
 		self.margin_h_label.pack(anchor='w')
-		self.margin_h_entry = tk.Entry(self.info_frame, textvariable=self.margin_h_var)
+		self.margin_h_entry = tk.Entry(self.inputs_frame, textvariable=self.margin_h_var)
 		self.margin_h_entry.pack(fill='x')
+		self.margin_h_entry.bind("<FocusOut>", self.update_page_view)
 
 		# Margin vertical input
-		self.margin_v_var = tk.DoubleVar()
-		self.margin_v_label = tk.Label(self.info_frame, text='Printer Margin Vertical:')
+		self.margin_v_var = tk.DoubleVar(value=Unit.Millimeter.toPt(7))
+		self.margin_v_label = tk.Label(self.inputs_frame, text='Printer Margin Vertical:')
 		self.margin_v_label.pack(anchor='w')
-		self.margin_v_entry = tk.Entry(self.info_frame, textvariable=self.margin_v_var)
+		self.margin_v_entry = tk.Entry(self.inputs_frame, textvariable=self.margin_v_var)
 		self.margin_v_entry.pack(fill='x')
+		self.margin_v_entry.bind("<FocusOut>", self.update_page_view)
 
 		# Bleed input
-		self.bleed_var = tk.DoubleVar()
-		self.bleed_label = tk.Label(self.info_frame, text='Overlap:')
+		self.bleed_var = tk.DoubleVar(value=Unit.Millimeter.toPt(4))
+		self.bleed_label = tk.Label(self.inputs_frame, text='Overlap:')
 		self.bleed_label.pack(anchor='w')
-		self.bleed_entry = tk.Entry(self.info_frame, textvariable=self.bleed_var)
+		self.bleed_entry = tk.Entry(self.inputs_frame, textvariable=self.bleed_var)
 		self.bleed_entry.pack(fill='x')
+		self.bleed_entry.bind("<FocusOut>", self.update_page_view)
 
 		# Add loading indicator
 		self.loading_var = tk.StringVar()
-		self.loading_label = tk.Label(self.info_frame, textvariable=self.loading_var, fg='blue')
+		self.loading_label = tk.Label(self.inputs_frame, textvariable=self.loading_var, fg='blue')
 		self.loading_label.pack(pady=10)
+
+
+		self.slice_button = tk.Button(
+			self.inputs_frame,
+			text='Save sliced PDF',
+			command=self.slice_n_dice,
+			state=tk.DISABLED
+		)
+		self.slice_button.pack(padx=10)
 
 		self.length_vars = [self.width_var, self.height_var, self.margin_v_var, self.margin_h_var, self.bleed_var]
 		self.select_paper_size_preset()
@@ -251,11 +258,13 @@ class PDFViewer:
 			width, height = height, width
 		self.width_var.set(Unit.Point.to(self.unit, width))
 		self.height_var.set(Unit.Point.to(self.unit, height))
+		self.update_page_view()
 
 	def set_custom_paper_size(self, *args):
 		self.paper_size_var.set("Custom")
 		self.orientation_var.set("Portrait" if self.height_var.get() > self.width_var.get() else "Landscape")
-		update_
+		self.update_page_view()
+
 	def update_orientation(self):
 		width, height = self.width_var.get(), self.height_var.get()
 		min_val = min(width, height)
@@ -263,6 +272,7 @@ class PDFViewer:
 		mode = self.orientation_var.get()
 		self.width_var.set(min_val if mode=="Portrait" else max_val)
 		self.height_var.set(max_val if mode=="Portrait" else min_val)
+		self.update_page_view()
 
 	def load_pdf(self):
 		file_path = filedialog.askopenfilename(
@@ -293,6 +303,7 @@ class PDFViewer:
 		self.zoom_level = 1.0
 		self.zoom_in_button.config(state=tk.NORMAL)
 		self.zoom_out_button.config(state=tk.NORMAL)
+		self.slice_button.config(state=tk.NORMAL)
 
 		# Display page size information
 		self.update_sidebar(self.current_page)
@@ -304,7 +315,10 @@ class PDFViewer:
 	def get_display_dpi(self):
 		return round(self.default_dpi * self.zoom_level)
 	
-	def update_page_view(self):
+	def update_page_view(self, *args):
+		if not self.doc:
+			return
+		
 		# idk seems to be faster/not slower to just render with higher dpi?
 		page = self.doc[self.current_page]
 		pix = page.get_pixmap(dpi=self.get_display_dpi())
@@ -325,13 +339,13 @@ class PDFViewer:
 		# I see a repetitive pattern here
 		
 		area_w, area_h = self.doc[self.current_page].mediabox_size
-		page_w = self.unit.to(Unit.Point, self.width_var.get())
-		page_h = self.unit.to(Unit.Point, self.height_var.get())
-		margin_v = self.unit.to(Unit.Point, self.margin_v_var.get())
-		margin_h = self.unit.to(Unit.Point, self.margin_h_var.get())
-		bleed = self.unit.to(Unit.Point, self.bleed_var.get())
+		page_w = self.unit.toPt(self.width_var.get())
+		page_h = self.unit.toPt(self.height_var.get())
+		margin_v = self.unit.toPt(self.margin_v_var.get())
+		margin_h = self.unit.toPt(self.margin_h_var.get())
+		bleed = self.unit.toPt(self.bleed_var.get())
 
-		pos_xs, pos_ys = slice_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
+		pos_xs, pos_ys = cover_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
 
 		# Draw the grid overlay
 		draw = ImageDraw.Draw(img)
@@ -343,6 +357,26 @@ class PDFViewer:
 
 		return ImageTk.PhotoImage(img)
 
+	def slice_n_dice(self):
+		file_path = filedialog.asksaveasfilename(
+			title='Save Sliced PDF File',
+			filetypes=[('PDF files', '*.pdf')]
+		)
+		if not file_path:
+			return
+		if not file_path.endswith(".pdf"):
+			file_path += ".pdf"
+
+		area_w, area_h = self.doc[self.current_page].mediabox_size
+		page_w = self.unit.toPt(self.width_var.get())
+		page_h = self.unit.toPt(self.height_var.get())
+		margin_v = self.unit.toPt(self.margin_v_var.get())
+		margin_h = self.unit.toPt(self.margin_h_var.get())
+		bleed = self.unit.toPt(self.bleed_var.get())
+		pos_xs, pos_ys = cover_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
+
+		new_doc = slice_pdf(self.doc, self.current_page, pos_xs, pos_ys, page_w, page_h, margin_v, margin_h, bleed)
+		new_doc.save(file_path)
 
 	def update_sidebar(self, page_num):
 		if not self.doc or page_num < 0 or page_num >= len(self.doc):
