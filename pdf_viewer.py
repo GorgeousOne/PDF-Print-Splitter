@@ -4,7 +4,7 @@ from tkinter import filedialog, Canvas, Scrollbar
 import fitz
 import os
 from PIL import Image, ImageTk, ImageDraw
-from page_config import Unit, MediaSize, PageConfig
+from page_config import Unit, PageSize, slice_area
 
 class PDFViewer:
 	def __init__(self, root):
@@ -25,8 +25,8 @@ class PDFViewer:
 		self.split_frame.pack(fill=tk.BOTH, expand=True)
 
 		# Create and place widgets
-		self.create_canvas_widgets()
-		self.create_pdf_widgets()
+		self.create_page_view_widgets()
+		self.create_slicing_widgets()
 
 		# Initialize variables
 		self.current_pdf = None
@@ -40,6 +40,7 @@ class PDFViewer:
 		# Current displayed image (must keep reference to prevent garbage collection)
 		self.current_image = None
 		self.convert_unit()
+		self.default_dpi = 96
 
 
 	def create_nav_widgets(self):
@@ -113,7 +114,7 @@ class PDFViewer:
 		)
 		self.zoom_in_button.pack(side=tk.RIGHT, padx=5)
 
-	def create_canvas_widgets(self):
+	def create_page_view_widgets(self):
 		# Canvas frame with scrollbars
 		self.canvas_frame = tk.Frame(self.split_frame)
 		self.split_frame.add(self.canvas_frame)
@@ -145,7 +146,7 @@ class PDFViewer:
 		self.v_scrollbar.config(command=self.canvas.yview)
 
 
-	def create_pdf_widgets(self):
+	def create_slicing_widgets(self):
 		# Information panel on right
 		self.info_frame = tk.LabelFrame(self.split_frame, text='PDF Slicing')
 		self.split_frame.add(self.info_frame)
@@ -154,7 +155,7 @@ class PDFViewer:
 		# Dropdown for display unit
 		display_units = [f'{unit.name} ({unit.abbreviation})' for unit in Unit]
 		self.unit_var = tk.StringVar(value=display_units[2])
-		self.prev_unit = Unit.Point
+		self.curr_unit = Unit.Point
 		self.unit_label = tk.Label(self.info_frame, text='Display Unit:')
 		self.unit_label.pack(anchor='w')
 
@@ -166,7 +167,7 @@ class PDFViewer:
 		self.size_info.pack(pady=10)
 
 		# Dropdown for paper sizes
-		paper_sizes = [size.name for size in MediaSize]
+		paper_sizes = [size.name for size in PageSize]
 		self.paper_size_var = tk.StringVar(value=paper_sizes[0])
 		self.paper_size_label = tk.Label(self.info_frame, text='Paper Size:')
 		self.paper_size_label.pack(anchor='w')
@@ -231,28 +232,30 @@ class PDFViewer:
 
 	def convert_unit(self, *args):
 		next_unit = Unit[self.unit_var.get().split()[0]]
-		print(self.prev_unit, "->", next_unit)
+		print(self.curr_unit, "->", next_unit)
 		
 		for var in self.length_vars:
-			var.set(self.prev_unit.to(var.get(), next_unit))
-		self.prev_unit = next_unit
+			var.set(self.curr_unit.to(next_unit, var.get()))
+
+		self.curr_unit = next_unit
+		self.update_sidebar(self.current_page)
 
 	def select_paper_size_preset(self, *args):
 		size_name = self.paper_size_var.get()
 		
-		if size_name not in MediaSize.__members__:
+		if size_name not in PageSize.__members__:
 			return
 		
-		width, height = MediaSize[size_name].value
+		width, height = PageSize[size_name].value
 		if self.orientation_var.get() == 'Landscape':
 			width, height = height, width
-		self.width_var.set(Unit.Point.to(width, self.prev_unit))
-		self.height_var.set(Unit.Point.to(height, self.prev_unit))
+		self.width_var.set(Unit.Point.to(self.curr_unit, width))
+		self.height_var.set(Unit.Point.to(self.curr_unit, height))
 
 	def set_custom_paper_size(self, *args):
 		self.paper_size_var.set("Custom")
 		self.orientation_var.set("Portrait" if self.height_var.get() > self.width_var.get() else "Landscape")
-
+		update_
 	def update_orientation(self):
 		width, height = self.width_var.get(), self.height_var.get()
 		min_val = min(width, height)
@@ -260,20 +263,6 @@ class PDFViewer:
 		mode = self.orientation_var.get()
 		self.width_var.set(min_val if mode=="Portrait" else max_val)
 		self.height_var.set(max_val if mode=="Portrait" else min_val)
-
-
-	def update_dimensions(self, *args):
-		print("hello")
-		print(MediaSize.__members__)
-		if size_name in MediaSize.__members__:
-			width, height = MediaSize[size_name].value
-			if self.orientation_var.get() == 'Landscape':
-				width, height = height, width
-		else:
-			width, height = self.width_var.get(), self.height_var.get()
-
-		self.width_var.set(width)
-		self.height_var.set(height)
 
 	def load_pdf(self):
 		file_path = filedialog.askopenfilename(
@@ -294,15 +283,14 @@ class PDFViewer:
 		# Set variables
 		self.current_pdf = fitz.open(file_path)
 		self.current_page = 0
-		self.zoom_level = 1.0
 
 		# Update UI
 		filename = os.path.basename(file_path)
 		self.file_label_text.set(f'Loaded: {filename}')
-		self.zoom_level_var.set('100%')
-
-		# Enable navigation and zoom buttons
 		self.update_navigation_buttons()
+
+		self.zoom_level_var.set('100%')
+		self.zoom_level = 1.0
 		self.zoom_in_button.config(state=tk.NORMAL)
 		self.zoom_out_button.config(state=tk.NORMAL)
 
@@ -313,42 +301,17 @@ class PDFViewer:
 		# Clear loading indicator
 		self.loading_var.set('')
 
-
-	def load_page_image(self, page_num):
-		'''Load a page image into the cache if not already present'''
-		if self.current_pdf is None or page_num < 0 or page_num > len(self.current_pdf) - 1:
-			return False
-
-		# Check if the page is already in the cache
-		if page_num in self.image_cache:
-			return True
-
-		# Show loading indicator
-		self.loading_var.set(f'Loading page {page_num + 1}...')
-		self.root.update()
-
-		# Convert PDF page to image using the in-memory PDF data
-		page = self.current_pdf[page_num]
-		pix = page.get_pixmap()
-		self.image_cache[page_num] = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-		self.loading_var.set('')
-		return True
-
-
+	def get_display_dpi(self):
+		return round(self.default_dpi * self.zoom_level)
+	
 	def update_page_view(self):
-		if not self.load_page_image(self.current_page):
-			return
-
-		# Get the original image from cache
-		original = self.image_cache[self.current_page]
-
-		# Apply zoom by creating a resized copy
-		new_width = int(original.width * self.zoom_level)
-		new_height = int(original.height * self.zoom_level)
-		display_img = original.resize((new_width, new_height), Image.LANCZOS)
+		# idk seems to be faster/not slower to just render with higher dpi?
+		page = self.current_pdf[self.current_page]
+		pix = page.get_pixmap(dpi=self.get_display_dpi())
+		display_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
 		# Convert to PhotoImage for Tkinter
-		self.current_image = self.draw_grid(display_img) #ImageTk.PhotoImage(display_img)
+		self.current_image = self.draw_grid(display_img) #ImageTk.PhotoImage(display_img) 
 
 		# Clear canvas and display the image
 		self.canvas.delete('all')
@@ -359,22 +322,25 @@ class PDFViewer:
 
 
 	def draw_grid(self, img: Image):
-		# Convert DPI from PDF to pixels (assuming 72 DPI in PDF)
-		dpi = 72  # Default PyMuPDF resolution
-		cm_to_px = lambda cm: int((cm / 2.54) * dpi)  # Convert cm to pixels
-		grid_spacing = cm_to_px(5)  # 5 cm grid spacing
+		# I see a repetitive pattern here
+		
+		area_w, area_h = self.current_pdf[self.current_page].mediabox_size
+		page_w = self.curr_unit.to(Unit.Point, self.width_var.get())
+		page_h = self.curr_unit.to(Unit.Point, self.height_var.get())
+		margin_v = self.curr_unit.to(Unit.Point, self.margin_v_var.get())
+		margin_h = self.curr_unit.to(Unit.Point, self.margin_h_var.get())
+		bleed = self.curr_unit.to(Unit.Point, self.bleed_var.get())
+
+		pos_xs, pos_ys = slice_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
 
 		# Draw the grid overlay
 		draw = ImageDraw.Draw(img)
-		width, height = img.size
 
-		# Draw vertical lines
-		for x in range(0, width, grid_spacing):
-			draw.line([(x, 0), (x, height)], fill="red", width=1)
+		pixel_scale = self.get_display_dpi() / 72
+		for y in pos_ys:
+			for x in pos_xs:
+				draw.rectangle([x*pixel_scale, y*pixel_scale, (x+page_w)*pixel_scale, (y+page_h)*pixel_scale], outline="red", width=1)
 
-		# Draw horizontal lines
-		for y in range(0, height, grid_spacing):
-			draw.line([(0, y), (width, y)], fill="red", width=1)
 		return ImageTk.PhotoImage(img)
 
 
@@ -384,7 +350,9 @@ class PDFViewer:
 
 		# Get page dimensions from /MediaBox
 		width_pts, height_pts = self.current_pdf[page_num].mediabox_size
-		self.size_info.config(text=f'Width: {width_pts:.2f} points\nHeight: {height_pts:.2f} points')
+		width = Unit.Point.to(self.curr_unit, width_pts)
+		height = Unit.Point.to(self.curr_unit, height_pts)
+		self.size_info.config(text=f'Width: {width:.2f} {self.curr_unit.abbreviation}\nHeight: {height:.2f} {self.curr_unit.abbreviation}')
 
 	def next_page(self):
 		if self.current_page >= len(self.current_pdf) - 1:
