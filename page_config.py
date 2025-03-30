@@ -1,20 +1,37 @@
 from enum import Enum
 from typing import List, Tuple
 
-def mm2pt(value: float) -> float:
-    return value * 2.8346456693
+class Unit(Enum):
+    Point = 1
+    Inch = 72
+    Millimeter = 2.8346456693
+    Centimeter = 28.346456693
+
+    @property
+    def abbreviation(self):
+        return {
+            Unit.Point: "pt",
+            Unit.Inch: "in",
+            Unit.Millimeter: "mm",
+            Unit.Centimeter: "cm",
+        }[self]
+
+    def to(self, val:float, to_unit:"Unit"):
+        return val * self.value / to_unit.value
 
 class MediaSize(Enum):
-    A4 = (mm2pt(210), mm2pt(297))
-    A3 = (mm2pt(297), mm2pt(420))
+    A4 = (Unit.Millimeter.to(210, Unit.Point), Unit.Millimeter.to(297, Unit.Point))
+    A3 = (Unit.Millimeter.to(297, Unit.Point), Unit.Millimeter.to(420, Unit.Point))
+
 
 class Orientation(Enum):
     PORTRAIT = 0
     LANDSCAPE = 1
 
+
 class PageConfig:
-    def __init__(self, media_size: MediaSize = MediaSize.A4, orientation: Orientation = Orientation.PORTRAIT, 
-                 crop_vert: float = 0, crop_horz: float = 0, bleed: float = 0):
+    def __init__(self, media_size:MediaSize = MediaSize.A4, orientation:Orientation = Orientation.PORTRAIT, 
+                 crop_vert:float = 0, crop_horz:float = 0, bleed:float = 0):
         """
         Initializes the page configuration.
 

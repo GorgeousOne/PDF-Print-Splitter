@@ -4,7 +4,7 @@ from tkinter import filedialog, Canvas, Scrollbar
 import fitz
 import os
 from PIL import Image, ImageTk, ImageDraw
-from page_config import MediaSize, PageConfig
+from page_config import Unit, MediaSize, PageConfig
 
 class PDFViewer:
 	def __init__(self, root):
@@ -39,6 +39,7 @@ class PDFViewer:
 
 		# Current displayed image (must keep reference to prevent garbage collection)
 		self.current_image = None
+		self.convert_unit()
 
 
 	def create_nav_widgets(self):
@@ -146,64 +147,74 @@ class PDFViewer:
 
 	def create_pdf_widgets(self):
 		# Information panel on right
-		self.info_frame = tk.LabelFrame(self.split_frame, text='PDF')
+		self.info_frame = tk.LabelFrame(self.split_frame, text='PDF Slicing')
 		self.split_frame.add(self.info_frame)
 		self.split_frame.paneconfig(self.info_frame, minsize=200)
 
+		# Dropdown for display unit
+		display_units = [f'{unit.name} ({unit.abbreviation})' for unit in Unit]
+		self.unit_var = tk.StringVar(value=display_units[2])
+		self.prev_unit = Unit.Point
+		self.unit_label = tk.Label(self.info_frame, text='Display Unit:')
+		self.unit_label.pack(anchor='w')
+
+		self.unit_dropdown = tk.OptionMenu(self.info_frame, self.unit_var, *display_units, command=self.convert_unit)
+		self.unit_dropdown.pack(fill='x')
+
 		# Size information labels
-		self.size_info = tk.Label(self.info_frame, text='Width: -- pt\nHeight: -- pt')
+		self.size_info = tk.Label(self.info_frame, text='Width: --\nHeight: --')
 		self.size_info.pack(pady=10)
 
 		# Dropdown for paper sizes
-		self.paper_size_var = tk.StringVar(value='A4')
+		paper_sizes = [size.name for size in MediaSize]
+		self.paper_size_var = tk.StringVar(value=paper_sizes[0])
 		self.paper_size_label = tk.Label(self.info_frame, text='Paper Size:')
 		self.paper_size_label.pack(anchor='w')
 
-		paper_sizes = [size.name for size in MediaSize]
-		paper_sizes.append("Custom")
-
-		self.paper_size_dropdown = tk.OptionMenu(self.info_frame, self.paper_size_var, *paper_sizes)
+		self.paper_size_dropdown = tk.OptionMenu(self.info_frame, self.paper_size_var, *paper_sizes, command=self.select_paper_size_preset)
 		self.paper_size_dropdown.pack(fill='x')
-
+		
 		# Orientation selection
 		self.orientation_var = tk.StringVar(value='Portrait')
-		self.portrait_radio = tk.Radiobutton(self.info_frame, text='Portrait', variable=self.orientation_var, value='Portrait', command=self.update_dimensions)
-		self.landscape_radio = tk.Radiobutton(self.info_frame, text='Landscape', variable=self.orientation_var, value='Landscape', command=self.update_dimensions)
+		self.portrait_radio = tk.Radiobutton(self.info_frame, text='Portrait', variable=self.orientation_var, value='Portrait', command=self.update_orientation)
+		self.landscape_radio = tk.Radiobutton(self.info_frame, text='Landscape', variable=self.orientation_var, value='Landscape', command=self.update_orientation)
 		self.portrait_radio.pack(anchor='w')
 		self.landscape_radio.pack(anchor='w')
 
 		# Width input
-		self.width_var = tk.IntVar()
+		self.width_var = tk.DoubleVar()
 		self.width_label = tk.Label(self.info_frame, text='Width:')
 		self.width_label.pack(anchor='w')
 		self.width_entry = tk.Entry(self.info_frame, textvariable=self.width_var)
 		self.width_entry.pack(fill='x')
-		self.width_var.trace_add('write', self.set_custom_size)
+		# self.width_var.trace_add('write', self.set_custom_paper_size)
+		self.width_entry.bind("<FocusOut>", self.set_custom_paper_size)
 
 		# Height input
-		self.height_var = tk.IntVar()
+		self.height_var = tk.DoubleVar()
 		self.height_label = tk.Label(self.info_frame, text='Height:')
 		self.height_label.pack(anchor='w')
 		self.height_entry = tk.Entry(self.info_frame, textvariable=self.height_var)
 		self.height_entry.pack(fill='x')
-		self.height_var.trace_add('write', self.set_custom_size)
+		# self.height_var.trace_add('write', self.set_custom_paper_size)
+		self.height_entry.bind("<FocusOut>", self.set_custom_paper_size)
 
 		# Margin horizontal input
-		self.margin_h_var = tk.IntVar()
+		self.margin_h_var = tk.DoubleVar()
 		self.margin_h_label = tk.Label(self.info_frame, text='Printer Margin Horizontal:')
 		self.margin_h_label.pack(anchor='w')
 		self.margin_h_entry = tk.Entry(self.info_frame, textvariable=self.margin_h_var)
 		self.margin_h_entry.pack(fill='x')
 
 		# Margin vertical input
-		self.margin_v_var = tk.IntVar()
+		self.margin_v_var = tk.DoubleVar()
 		self.margin_v_label = tk.Label(self.info_frame, text='Printer Margin Vertical:')
 		self.margin_v_label.pack(anchor='w')
 		self.margin_v_entry = tk.Entry(self.info_frame, textvariable=self.margin_v_var)
 		self.margin_v_entry.pack(fill='x')
 
 		# Bleed input
-		self.bleed_var = tk.IntVar()
+		self.bleed_var = tk.DoubleVar()
 		self.bleed_label = tk.Label(self.info_frame, text='Overlap:')
 		self.bleed_label.pack(anchor='w')
 		self.bleed_entry = tk.Entry(self.info_frame, textvariable=self.bleed_var)
@@ -214,14 +225,45 @@ class PDFViewer:
 		self.loading_label = tk.Label(self.info_frame, textvariable=self.loading_var, fg='blue')
 		self.loading_label.pack(pady=10)
 
-	def set_custom_size(self, *args):
-		self.paper_size_var.set('Custom')
+		self.length_vars = [self.width_var, self.height_var, self.margin_v_var, self.margin_h_var, self.bleed_var]
+		self.select_paper_size_preset()
+
+
+	def convert_unit(self, *args):
+		next_unit = Unit[self.unit_var.get().split()[0]]
+		print(self.prev_unit, "->", next_unit)
+		
+		for var in self.length_vars:
+			var.set(self.prev_unit.to(var.get(), next_unit))
+		self.prev_unit = next_unit
+
+	def select_paper_size_preset(self, *args):
+		size_name = self.paper_size_var.get()
+		
+		if size_name not in MediaSize.__members__:
+			return
+		
+		width, height = MediaSize[size_name].value
+		if self.orientation_var.get() == 'Landscape':
+			width, height = height, width
+		self.width_var.set(Unit.Point.to(width, self.prev_unit))
+		self.height_var.set(Unit.Point.to(height, self.prev_unit))
+
+	def set_custom_paper_size(self, *args):
+		self.paper_size_var.set("Custom")
+		self.orientation_var.set("Portrait" if self.height_var.get() > self.width_var.get() else "Landscape")
 
 	def update_orientation(self):
-		pass
-	def update_dimensions(self):
-		size_name = self.paper_size_var.get()
+		width, height = self.width_var.get(), self.height_var.get()
+		min_val = min(width, height)
+		max_val = max(width, height)
+		mode = self.orientation_var.get()
+		self.width_var.set(min_val if mode=="Portrait" else max_val)
+		self.height_var.set(max_val if mode=="Portrait" else min_val)
 
+
+	def update_dimensions(self, *args):
+		print("hello")
 		print(MediaSize.__members__)
 		if size_name in MediaSize.__members__:
 			width, height = MediaSize[size_name].value
