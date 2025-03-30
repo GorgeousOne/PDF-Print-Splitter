@@ -29,7 +29,7 @@ class PDFViewer:
 		self.create_slicing_widgets()
 
 		# Initialize variables
-		self.current_pdf = None
+		self.doc = None
 		self.current_page = 0
 		self.zoom_level = 1.0  # For zoom functionality
 
@@ -38,7 +38,7 @@ class PDFViewer:
 		self.image_cache = {}
 
 		# Current displayed image (must keep reference to prevent garbage collection)
-		self.current_image = None
+		self.pdf_image = None
 		self.convert_unit()
 		self.default_dpi = 96
 
@@ -155,7 +155,7 @@ class PDFViewer:
 		# Dropdown for display unit
 		display_units = [f'{unit.name} ({unit.abbreviation})' for unit in Unit]
 		self.unit_var = tk.StringVar(value=display_units[2])
-		self.curr_unit = Unit.Point
+		self.unit = Unit.Point
 		self.unit_label = tk.Label(self.info_frame, text='Display Unit:')
 		self.unit_label.pack(anchor='w')
 
@@ -232,12 +232,12 @@ class PDFViewer:
 
 	def convert_unit(self, *args):
 		next_unit = Unit[self.unit_var.get().split()[0]]
-		print(self.curr_unit, "->", next_unit)
+		print(self.unit, "->", next_unit)
 		
 		for var in self.length_vars:
-			var.set(self.curr_unit.to(next_unit, var.get()))
+			var.set(self.unit.to(next_unit, var.get()))
 
-		self.curr_unit = next_unit
+		self.unit = next_unit
 		self.update_sidebar(self.current_page)
 
 	def select_paper_size_preset(self, *args):
@@ -249,8 +249,8 @@ class PDFViewer:
 		width, height = PageSize[size_name].value
 		if self.orientation_var.get() == 'Landscape':
 			width, height = height, width
-		self.width_var.set(Unit.Point.to(self.curr_unit, width))
-		self.height_var.set(Unit.Point.to(self.curr_unit, height))
+		self.width_var.set(Unit.Point.to(self.unit, width))
+		self.height_var.set(Unit.Point.to(self.unit, height))
 
 	def set_custom_paper_size(self, *args):
 		self.paper_size_var.set("Custom")
@@ -281,7 +281,7 @@ class PDFViewer:
 		self.root.update()
 
 		# Set variables
-		self.current_pdf = fitz.open(file_path)
+		self.doc = fitz.open(file_path)
 		self.current_page = 0
 
 		# Update UI
@@ -306,16 +306,16 @@ class PDFViewer:
 	
 	def update_page_view(self):
 		# idk seems to be faster/not slower to just render with higher dpi?
-		page = self.current_pdf[self.current_page]
+		page = self.doc[self.current_page]
 		pix = page.get_pixmap(dpi=self.get_display_dpi())
 		display_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
 		# Convert to PhotoImage for Tkinter
-		self.current_image = self.draw_grid(display_img) #ImageTk.PhotoImage(display_img) 
+		self.pdf_image = self.draw_grid(display_img) #ImageTk.PhotoImage(display_img) 
 
 		# Clear canvas and display the image
 		self.canvas.delete('all')
-		self.canvas.create_image(0, 0, anchor=tk.NW, image=self.current_image)
+		self.canvas.create_image(0, 0, anchor=tk.NW, image=self.pdf_image)
 
 		# Update canvas scrollregion
 		self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
@@ -324,12 +324,12 @@ class PDFViewer:
 	def draw_grid(self, img: Image):
 		# I see a repetitive pattern here
 		
-		area_w, area_h = self.current_pdf[self.current_page].mediabox_size
-		page_w = self.curr_unit.to(Unit.Point, self.width_var.get())
-		page_h = self.curr_unit.to(Unit.Point, self.height_var.get())
-		margin_v = self.curr_unit.to(Unit.Point, self.margin_v_var.get())
-		margin_h = self.curr_unit.to(Unit.Point, self.margin_h_var.get())
-		bleed = self.curr_unit.to(Unit.Point, self.bleed_var.get())
+		area_w, area_h = self.doc[self.current_page].mediabox_size
+		page_w = self.unit.to(Unit.Point, self.width_var.get())
+		page_h = self.unit.to(Unit.Point, self.height_var.get())
+		margin_v = self.unit.to(Unit.Point, self.margin_v_var.get())
+		margin_h = self.unit.to(Unit.Point, self.margin_h_var.get())
+		bleed = self.unit.to(Unit.Point, self.bleed_var.get())
 
 		pos_xs, pos_ys = slice_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
 
@@ -345,17 +345,17 @@ class PDFViewer:
 
 
 	def update_sidebar(self, page_num):
-		if not self.current_pdf or page_num < 0 or page_num >= len(self.current_pdf):
+		if not self.doc or page_num < 0 or page_num >= len(self.doc):
 			return
 
 		# Get page dimensions from /MediaBox
-		width_pts, height_pts = self.current_pdf[page_num].mediabox_size
-		width = Unit.Point.to(self.curr_unit, width_pts)
-		height = Unit.Point.to(self.curr_unit, height_pts)
-		self.size_info.config(text=f'Width: {width:.2f} {self.curr_unit.abbreviation}\nHeight: {height:.2f} {self.curr_unit.abbreviation}')
+		width_pts, height_pts = self.doc[page_num].mediabox_size
+		width = Unit.Point.to(self.unit, width_pts)
+		height = Unit.Point.to(self.unit, height_pts)
+		self.size_info.config(text=f'Width: {width:.2f} {self.unit.abbreviation}\nHeight: {height:.2f} {self.unit.abbreviation}')
 
 	def next_page(self):
-		if self.current_page >= len(self.current_pdf) - 1:
+		if self.current_page >= len(self.doc) - 1:
 			return
 		self.current_page += 1
 		self.update_sidebar(self.current_page)
@@ -388,9 +388,9 @@ class PDFViewer:
 		self.update_page_view()
 
 	def update_navigation_buttons(self):
-		self.page_info.set(f'Page: {self.current_page + 1} / {len(self.current_pdf)}')
+		self.page_info.set(f'Page: {self.current_page + 1} / {len(self.doc)}')
 		self.prev_button.config(state= tk.DISABLED if self.current_page <= 0 else tk.NORMAL)
-		self.next_button.config(state=tk.DISABLED if self.current_page >= len(self.current_pdf)-1 else tk.NORMAL)
+		self.next_button.config(state=tk.DISABLED if self.current_page >= len(self.doc)-1 else tk.NORMAL)
 
 if __name__ == '__main__':
 	# Create main window
