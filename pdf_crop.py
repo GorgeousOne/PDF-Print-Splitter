@@ -9,10 +9,7 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 		new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
 
 	big_w, big_h = doc[page_num].mediabox_size
-	print(new_doc.page_count)
-
 	index = 0
-	marker = Unit.Millimeter.toPt(2)
 
 	for i, y in enumerate(pos_ys):
 		for j, x in enumerate(pos_xs):
@@ -20,6 +17,8 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 			crop_rect = fitz.Rect((x, big_h - (y + page_h)), (x + page_w,  big_h - y))
 			page = new_doc[index]
 			page.set_mediabox(crop_rect)
+			
+			shape = page.new_shape()
 
 			bleed_x = page_w - margin_x - bleed
 			bleed_y = page_h - margin_y - bleed
@@ -27,26 +26,28 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 			content_max_y = page_h - margin_y
 
 			# left margin
-			page.draw_line((margin_y, 0), (margin_y, page_h))
+			shape.draw_line((margin_y, 0), (margin_y, page_h))
 			# top margin
-			page.draw_line((0, margin_x), (page_w, margin_x))
+			shape.draw_line((0, margin_x), (page_w, margin_x))
 
 			if j == len(pos_xs)-1:
 				# right margin
-				page.draw_line((content_max_x, 0), (content_max_x, page_h))
+				shape.draw_line((content_max_x, 0), (content_max_x, page_h))
 			else:
 				# right overlap indicator
-				page.draw_line((bleed_x, 0), (bleed_x, 2*margin_y))
-				page.draw_line((bleed_x, content_max_y - bleed - margin_y), (bleed_x, page_h))
+				shape.draw_line((bleed_x, 0), (bleed_x, 2*margin_y))
+				shape.draw_line((bleed_x, content_max_y - bleed - margin_y), (bleed_x, page_h))
 
 			if i == len(pos_ys)-1:
 				# bottom margin
-				page.draw_line((0, content_max_y), (page_w, content_max_y))
+				shape.draw_line((0, content_max_y), (page_w, content_max_y))
 			else:
 				# bottom overlap indicator
-				page.draw_line((0, bleed_y), (2*margin_x, bleed_y))
-				page.draw_line((content_max_x - bleed - margin_x, bleed_y), (page_w, bleed_y))
+				shape.draw_line((0, bleed_y), (2*margin_x, bleed_y))
+				shape.draw_line((content_max_x - bleed - margin_x, bleed_y), (page_w, bleed_y))
 
+			shape.finish(width = Unit.Millimeter.toPt(0.1), color=(.75, .75, .75))
+			shape.commit()
 			index += 1
 	return new_doc
 

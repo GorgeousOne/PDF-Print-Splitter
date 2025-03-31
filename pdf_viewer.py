@@ -219,6 +219,10 @@ class PDFViewer:
 		self.bleed_entry.pack(fill='x')
 		self.bleed_entry.bind("<FocusOut>", self.update_page_view)
 
+		self.slice_count_var = tk.StringVar()
+		self.slice_count_label = tk.Label(self.inputs_frame, textvariable=self.slice_count_var, fg='blue')
+		self.slice_count_label.pack(pady=10)
+
 		# Add loading indicator
 		self.loading_var = tk.StringVar()
 		self.loading_label = tk.Label(self.inputs_frame, textvariable=self.loading_var, fg='blue')
@@ -346,7 +350,7 @@ class PDFViewer:
 		bleed = self.unit.toPt(self.bleed_var.get())
 
 		pos_xs, pos_ys = cover_area(area_w, area_h, page_w, page_h, margin_v, margin_h, bleed)
-
+		self.slice_count_var.set(f"Current number of split pages: {len(pos_xs) * len(pos_ys)}")
 		# Draw the grid overlay
 		draw = ImageDraw.Draw(img)
 
