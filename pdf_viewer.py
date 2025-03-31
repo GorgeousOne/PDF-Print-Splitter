@@ -212,7 +212,7 @@ class PDFViewer:
 		self.margin_v_entry.bind("<FocusOut>", self.update_page_view)
 
 		# Bleed input
-		self.bleed_var = tk.DoubleVar(value=Unit.Millimeter.toPt(4))
+		self.bleed_var = tk.DoubleVar(value=Unit.Millimeter.toPt(3))
 		self.bleed_label = tk.Label(self.inputs_frame, text='Overlap:')
 		self.bleed_label.pack(anchor='w')
 		self.bleed_entry = tk.Entry(self.inputs_frame, textvariable=self.bleed_var)

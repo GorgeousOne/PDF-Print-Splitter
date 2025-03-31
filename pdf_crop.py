@@ -1,7 +1,8 @@
 import fitz
 from typing import List
+from page_config import Unit
 
-def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:float, page_h:float, crop_vert:float = 0, crop_horz:float = 0, bleed:float = 0):
+def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:float, page_h:float, margin_y:float = 0, margin_x:float = 0, bleed:float = 0):
 	new_doc = fitz.open()
 
 	for _ in range(len(pos_xs) * len(pos_ys)):
@@ -10,18 +11,47 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 	big_w, big_h = doc[page_num].mediabox_size
 	print(new_doc.page_count)
 
-	i = 0
-	for y in pos_ys:
-		for x in pos_xs:
-			# i hate y up
-			crop_rect = fitz.Rect(x, big_h - (y + page_h), x + page_w, big_h - y)
-			page = new_doc[i]
+	index = 0
+	marker = Unit.Millimeter.toPt(2)
+
+	for i, y in enumerate(pos_ys):
+		for j, x in enumerate(pos_xs):
+			# why has mediabox the only coordinate system with y-up in here?
+			crop_rect = fitz.Rect((x, big_h - (y + page_h)), (x + page_w,  big_h - y))
+			page = new_doc[index]
 			page.set_mediabox(crop_rect)
-			i += 1
+
+			bleed_x = page_w - margin_x - bleed
+			bleed_y = page_h - margin_y - bleed
+			content_max_x = page_w - margin_x
+			content_max_y = page_h - margin_y
+
+			# left margin
+			page.draw_line((margin_y, 0), (margin_y, page_h))
+			# top margin
+			page.draw_line((0, margin_x), (page_w, margin_x))
+
+			if j == len(pos_xs)-1:
+				# right margin
+				page.draw_line((content_max_x, 0), (content_max_x, page_h))
+			else:
+				# right overlap indicator
+				page.draw_line((bleed_x, 0), (bleed_x, 2*margin_y))
+				page.draw_line((bleed_x, content_max_y - bleed - margin_y), (bleed_x, page_h))
+
+			if i == len(pos_ys)-1:
+				# bottom margin
+				page.draw_line((0, content_max_y), (page_w, content_max_y))
+			else:
+				# bottom overlap indicator
+				page.draw_line((0, bleed_y), (2*margin_x, bleed_y))
+				page.draw_line((content_max_x - bleed - margin_x, bleed_y), (page_w, bleed_y))
+
+			index += 1
 	return new_doc
 
 if __name__ == '__main__':
 	input_pdf = "frog.pdf"
 	doc = fitz.open(input_pdf)
-	new_doc = slice_pdf(doc, 0, [0, 200], [0, 200], 200, 200)
+	new_doc = slice_pdf(doc, 0, [0, 200, 400], [0, 200], 200, 200, 10, 10, 5)
 	new_doc.save("test-split.pdf")
