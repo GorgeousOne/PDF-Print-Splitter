@@ -11,6 +11,11 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 	big_w, big_h = doc[page_num].mediabox_size
 	index = 0
 
+	bleed_x = page_w - margin_x - bleed
+	bleed_y = page_h - margin_y - bleed
+	overlap_x = page_w - margin_x - bleed
+	overlap_y = page_h - margin_y - bleed
+
 	for i, y in enumerate(pos_ys):
 		for j, x in enumerate(pos_xs):
 			# why has mediabox the only coordinate system with y-up in here?
@@ -19,11 +24,8 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 			page.set_mediabox(crop_rect)
 			
 			shape = page.new_shape()
-
-			bleed_x = page_w - margin_x - bleed
-			bleed_y = page_h - margin_y - bleed
-			content_max_x = page_w - margin_x
-			content_max_y = page_h - margin_y
+			max_x = overlap_x
+			max_y = overlap_y
 
 			# left margin
 			shape.draw_line((margin_y, 0), (margin_y, page_h))
@@ -32,19 +34,24 @@ def slice_pdf(doc, page_num, pos_xs: List[float], pos_ys: List[float], page_w:fl
 
 			if j == len(pos_xs)-1:
 				# right margin
-				shape.draw_line((content_max_x, 0), (content_max_x, page_h))
-			else:
-				# right overlap indicator
-				shape.draw_line((bleed_x, 0), (bleed_x, 2*margin_y))
-				shape.draw_line((bleed_x, content_max_y - bleed - margin_y), (bleed_x, page_h))
+				max_x = big_w - x
+				shape.draw_line((max_x, 0), (max_x, page_h))
 
 			if i == len(pos_ys)-1:
 				# bottom margin
-				shape.draw_line((0, content_max_y), (page_w, content_max_y))
-			else:
+				max_y = big_h - y
+				shape.draw_line((0, max_y), (page_w, max_y))
+
+
+			if j < len(pos_xs)-1:
+				# right overlap indicator
+				shape.draw_line((bleed_x, 0), (bleed_x, 2*margin_y))
+				shape.draw_line((bleed_x, max_y - margin_y), (bleed_x, max_y + margin_y))
+
+			if i < len(pos_ys)-1:
 				# bottom overlap indicator
 				shape.draw_line((0, bleed_y), (2*margin_x, bleed_y))
-				shape.draw_line((content_max_x - bleed - margin_x, bleed_y), (page_w, bleed_y))
+				shape.draw_line((max_x - margin_x, bleed_y), (max_x + margin_x, bleed_y))
 
 			shape.finish(width = Unit.Millimeter.toPt(0.1), color=(.75, .75, .75))
 			shape.commit()

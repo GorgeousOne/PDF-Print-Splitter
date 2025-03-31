@@ -163,7 +163,7 @@ class PDFViewer:
 
 		# Dropdown for paper sizes
 		paper_sizes = [size.name for size in PageSize]
-		self.paper_size_var = tk.StringVar(value=paper_sizes[1])
+		self.paper_size_var = tk.StringVar(value=paper_sizes[0])
 		self.paper_size_label = tk.Label(self.inputs_frame, text='Paper Size:')
 		self.paper_size_label.pack(anchor='w')
 
